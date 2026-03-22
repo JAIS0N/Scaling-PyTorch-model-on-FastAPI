@@ -15,18 +15,47 @@ model_loading_time = 0
 async def lifespan(app: FastAPI):
     global MODEL_PATH, LABELS, model_loading_time
 
-    # Load model on startup
     model_loading_start_time = time.time()
 
-    # FIX: assign model + weights_only=False
-    app.state.model = torch.load(
+    # ------------------------------------------------------
+    #  OLD VERSION (no JIT)
+    # ------------------------------------------------------
+    # app.state.model = torch.load(
+    #     MODEL_PATH,
+    #     map_location=torch.device("cpu"),
+    #     weights_only=False
+    # )
+    # app.state.model.eval()
+
+    # ------------------------------------------------------
+    #  NEW VERSION (JIT optimized)
+    # ------------------------------------------------------
+    model = torch.load(
         MODEL_PATH,
         map_location=torch.device("cpu"),
         weights_only=False
     )
 
-    # Set evaluation mode
-    app.state.model.eval()
+    model.eval()
+
+    # Freeze gradients (extra optimization)
+    for param in model.parameters():
+        param.requires_grad_(False)
+
+    # Example input for tracing
+    example_input = torch.randn(1, 3, 224, 224)
+
+    # JIT tracing
+    with torch.jit.optimized_execution(True):
+        model = torch.jit.trace(model, example_input)
+
+    # Freeze JIT graph
+    model = torch.jit.freeze(model)
+
+    # Store optimized model
+    app.state.model = model
+
+    # ------------------------------------------------------
 
     # Load labels
     with open("imagenet_class_index.json", "r") as f:
@@ -36,7 +65,6 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    # Cleanup
     del app.state.model
 
 
@@ -66,17 +94,17 @@ def preprocess_image(image):
 @app.post("/predict")
 async def predict(file: UploadFile = File(...)):
     start_time = time.time()
-    # Read and preprocess the image
+
     image = Image.open(file.file).convert("RGB")
     input_data = preprocess_image(image)
 
-    # Run inference
+    #  Use inference_mode (best practice)
     with torch.inference_mode():
         results = app.state.model(input_data)
 
-    # Get the predicted class probabilities
     probabilities = torch.nn.functional.softmax(results[0], dim=0)
     top_prob, top_class = torch.max(probabilities, 0)
+
     label = LABELS[str(top_class.item())][-1]
     score = top_prob.item()
 
