@@ -1,9 +1,10 @@
 import json
 import time
 from contextlib import asynccontextmanager
-
+from fastapi import FastAPI, status, UploadFile, File
 import torch
-from fastapi import FastAPI, status
+from PIL import Image
+import numpy as np
 
 MODEL_PATH = "./mobilenet_v2.pt"
 LABELS = {}
