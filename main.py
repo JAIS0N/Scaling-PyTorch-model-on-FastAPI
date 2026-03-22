@@ -71,7 +71,7 @@ async def predict(file: UploadFile = File(...)):
     input_data = preprocess_image(image)
 
     # Run inference
-    with torch.no_grad():
+    with torch.inference_mode():
         results = app.state.model(input_data)
 
     # Get the predicted class probabilities
